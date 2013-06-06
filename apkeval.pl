@@ -22,9 +22,9 @@ use URI::Find;
 use URI::Encode;
 use Proc::Background;
 
-getopts('ha:p:dsenrw');
+getopts('ha:p:dsenrwu');
 
-our($opt_h, $opt_a, $opt_p, $opt_d, $opt_s, $opt_e, $opt_n, $opt_r, $opt_w);
+our($opt_h, $opt_a, $opt_p, $opt_d, $opt_s, $opt_e, $opt_n, $opt_r, $opt_w, $opt_u);
 
 # SPADE Startup delay
 # Number of seconds to wait for SPADE to start.
@@ -83,7 +83,7 @@ sub help()
  -n "use a pre-existing snapshot of an emulated virtual devices (disables SDCard creation on startup)"
  -r "collect data with the SPADE provenance system. SPADE must be preinstalled into a snapshot enabled emulated virtual device. REQUIRES -n"
  -w "wait for user's input after running an APK to complete the analysis (disables random gestures sending)"
-
+ -u "directs SPADE to monitor only the running APK instead of all system components"
 
 EOF
   exit;
@@ -95,6 +95,7 @@ if ($opt_h) { &help; }
 # built-in to Android and must be installed in to a custom AVD with
 # snapshots enabled (so that state can be saved between boots).
 if ($opt_r && !$opt_n) { &help; } 
+if ($opt_u && !$opt_r) { &help; }
 
 if ((!$opt_h) && (!$opt_a) && (!$opt_p) && (!$opt_d) && (!$opt_s) && (!$opt_e) && (!$opt_n)) { &help; }
 
@@ -866,6 +867,14 @@ sub avdtestcycle()
 
     sleep(1);
   
+    print "\n\n Getting ready to install Application $_ from the location ..........$APKFULLPATH";
+
+    print "\n\n Installing $_ now :- \n";
+
+    system("adb -s $SCANDEVICE install $APKFULLPATH");
+
+    sleep($Tm);
+
     if($opt_r) {
 
         # Start the SPADE application 
@@ -873,7 +882,32 @@ sub avdtestcycle()
 
         print "\n Starting SPADE to capture system call provenance. \n";
 
-        `adb -s $SCANDEVICE shell am startservice spade.android/spade.android.SPADEAndroid`;
+        if($opt_u) {
+        
+          my $app_uid;
+          my $package_name = $HAPK{$_} -> {pkgnm};
+          print "adb -s $SCANDEVICE shell ls -l /data/data/ | grep $package_name | head -n1";
+          my $lsout = `adb -s $SCANDEVICE shell ls -l /data/data/ | grep $package_name | head -n1`;
+
+          if ($lsout =~ m/(u0_a)([0-9]+)/ ) { 
+
+            $app_uid = "100$2";
+            
+            print "Retrieved APP's UID: $app_uid\n\n";
+            
+            `adb -s $SCANDEVICE shell am startservice spade.android/spade.android.SPADEAndroid -e dump /sdcard/audit.dump --ei appUID $app_uid`;
+          
+          } else { 
+          
+            print "!!!!!! Could not retrieve APPUID - Skipping APK !!!!!!!\n\n";
+          
+          }
+        
+        } else {
+        
+          `adb -s $SCANDEVICE shell am startservice spade.android/spade.android.SPADEAndroid -e dump /sdcard/audit.dump`;
+        
+        }
 
         sleep(1);
 
@@ -893,14 +927,6 @@ sub avdtestcycle()
             print "\n SPADE launched\n";
         }
     }
-
-    print "\n\n Getting ready to install Application $_ from the location ..........$APKFULLPATH";
-
-    print "\n\n Installing $_ now :- \n";
-
-    system("adb -s $SCANDEVICE install $APKFULLPATH");
-
-    sleep($Tm);
 
     $LAUNCHAPK = $HAPK{$_} -> {pkgnm}  . "/" . $HAPK{$_} -> {launchact} ;  
 
