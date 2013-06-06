@@ -22,9 +22,10 @@ use URI::Find;
 use URI::Encode;
 use Proc::Background;
 
-getopts('ha:p:dsenr');
+getopts('ha:p:dsenrw');
 
-our($opt_h, $opt_a, $opt_p, $opt_d, $opt_s, $opt_e, $opt_n, $opt_r);
+our($opt_h, $opt_a, $opt_p, $opt_d, $opt_s, $opt_e, $opt_n, $opt_r, $opt_w);
+
 # SPADE Startup delay
 # Number of seconds to wait for SPADE to start.
 # Decrease to ~20-30 if your snapshot already has the SPADE binaries DexOpted. This would
@@ -81,6 +82,8 @@ sub help()
  -e "extensive scan mode where it will collect kernel logs, memory dump, running process at each stage"
  -n "use a pre-existing snapshot of an emulated virtual devices (disables SDCard creation on startup)"
  -r "collect data with the SPADE provenance system. SPADE must be preinstalled into a snapshot enabled emulated virtual device. REQUIRES -n"
+ -w "wait for user's input after running an APK to complete the analysis (disables random gestures sending)"
+
 
 EOF
   exit;
@@ -820,7 +823,7 @@ sub avdtestcycle()
 
   foreach (@ALLFILES)
   {
-    print "========= TEST CYCLE FOR $_ ===========";
+    print "========= TEST CYCLE FOR $_ ===========\n\n";
     # Use this $TESTROUND if you want to just see this tool as a demo purpose only and you can restrict it to run it only for few test cycles (e.g. 4 apps in here)
     #$TESTROUND++;
     #if ($TESTROUND == 4) { last; }
@@ -870,11 +873,9 @@ sub avdtestcycle()
 
         print "\n Starting SPADE to capture system call provenance. \n";
 
-        `adb -s $SCANDEVICE shell am start -n spade.android/spade.android.Main`;
+        `adb -s $SCANDEVICE shell am startservice spade.android/spade.android.SPADEAndroid`;
 
         sleep(1);
-
-        `adb -s $SCANDEVICE shell am broadcast -a spade.android.CONTROL -e action start`;
 
         my $CNT = 0;
         while( ($CNT < $SPADESTARTUP) && (!`cat bootlog.txt |grep "SPADE: Launch complete - Running Now"`) )
@@ -909,13 +910,27 @@ sub avdtestcycle()
 
     sleep($Tm);
 
+    system("adb -s $SCANDEVICE shell ps > $APKRESULTPATH/ps.txt");
+
     $PACKAGENAME = $HAPK{$_} -> {pkgnm};
 
-    print "\n Sending random gestures ... \n";
+    if($opt_w) {
+    
+        local( $| ) = ( 1 );
 
-    system("adb -s $SCANDEVICE shell monkey -p $PACKAGENAME $RGC");
+        print "\n Application started. Press <Enter> when you are done testing: \n";
 
-    sleep($Tm);
+        my $resp = <STDIN>;
+
+    } else {
+        
+        print "\n Sending random gestures ... \n";
+
+        system("adb -s $SCANDEVICE shell monkey -p $PACKAGENAME $RGC");
+
+        sleep($Tm);
+
+    }
 
     print "\n Done testing... uninstalling now .... \n";
 
@@ -961,9 +976,12 @@ sub avdtestcycle()
       print "\n Saving SPADE graph data to $APKRESULTPATH/graph.dot \n";
       # Pull dot file off from AVD with name the same as the current malware.
       `adb -s $SCANDEVICE pull /sdcard/audit.dot $APKRESULTPATH/graph.dot`;
+      `adb -s $SCANDEVICE pull /sdcard/spade.log $APKRESULTPATH/spade.log`;
+      `adb -s $SCANDEVICE pull /sdcard/audit.dump $APKRESULTPATH/audit.dump`;
 
-      # Delete dot file on the device
+      # Delete SPADE's output files on the device
       `adb -s $SCANDEVICE shell rm /sdcard/audit.dot`;
+      `adb -s $SCANDEVICE shell rm /sdcard/spade.log`;
 
       $SCANDEVICE="";
 
